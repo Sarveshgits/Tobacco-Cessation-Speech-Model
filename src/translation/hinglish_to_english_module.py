@@ -1,17 +1,22 @@
 import os
 import time
 import sys
+import torch
+import argparse
+import re
+# Allow unpickling of argparse.Namespace (DANGER: Only do this if you trust the source)
+torch.serialization.add_safe_globals([argparse.Namespace])
 
 # Add IndicTrans2 to Python path for local development
-sys.path.append("../../IndicTrans2")
-toolkit_path = os.path.join(os.path.dirname(__file__), '..', '..', 'indictrans_toolkit')
-sys.path.append("../../IndicTransToolkit/IndicTransToolkit")
+
+sys.path.append("/home/sarveshkumar/STT")
+
 
 from ai4bharat.transliteration import XlitEngine
 from langdetect import detect
 import torch
 from transformers import AutoModelForSeq2SeqLM, BitsAndBytesConfig, AutoTokenizer
-from IndicTransToolkit.processor import IndicProcessor
+from IndicTransToolkit.IndicTransToolkit.processor import IndicProcessor
 
 # Set Hugging Face cache path for faster reuse across reboots/runs
 os.environ["HF_HOME"] = "../../cache/model_cache"
@@ -84,7 +89,7 @@ def batch_translate(input_sentences, src_lang, tgt_lang, model, tokenizer, ip):
             generate_kwargs = {
                 "use_cache": True,
                 "min_length": 0,
-                "max_length": 512,
+                "max_length": 128,
                 "num_beams": 8,
                 "num_return_sequences": 1,
             }
@@ -100,7 +105,7 @@ def batch_translate(input_sentences, src_lang, tgt_lang, model, tokenizer, ip):
         )
 
         translations += ip.postprocess_batch(generated_tokens, lang=tgt_lang)
-        torch.cuda.empty_cache()  # free VRAM post inference
+        
 
     return translations
 
@@ -108,18 +113,14 @@ def batch_translate(input_sentences, src_lang, tgt_lang, model, tokenizer, ip):
 tokenizer, model = initialize_model_and_tokenizer(indic_en_ckpt_dir, quantization)
 ip = IndicProcessor(inference=True)
 
-def translate_to_english(text):
-    try:
-        lang = detect(text)
-    except Exception:
-        lang = "unknown"
+def is_devanagari(text):
+    return bool(re.search("[\u0900-\u097F]", text))
 
-    if lang == "en":
-        return text
-    elif lang == "hi":
+def translate_to_english(text):
+    if is_devanagari(text):
         src = "hin_Deva"
     else:
-        # Hinglish or other Latin script: transliterate first
+        # Assume Hinglish if not Devanagari
         text = xlit_engine.translit_sentence(text)["hi"]
         src = "hin_Deva"
 
